@@ -1,0 +1,247 @@
+---
+title: "Final Project - Penguins Analysis"
+author: "Anna Kocsis"
+date: "2024-12-16"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, echo = TRUE)
+```
+
+```{r}
+# Import libraries
+library(tidyverse)
+library(stats)
+library(lmtest)
+library(sandwich)
+library(car)
+```
+
+## Data Reading and Checking
+
+```{r}
+# Read the data
+penguins_raw <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/refs/heads/main/data/2020/2020-07-28/penguins.csv")
+
+# Check for missing values in each column
+colSums(is.na(penguins_raw))
+
+# Check for unique value count in each column 
+penguins_raw %>% summarise(across(everything(), n_distinct))
+```
+
+## Data Cleaning
+
+```{r}
+# Clean the data from rows with missing values
+penguins_clean <- penguins_raw %>%
+  na.omit()
+
+# Check if any missing value remains
+colSums(is.na(penguins_clean))
+
+# Check for unique value count in each column in the clean data
+penguins_clean %>% summarise(across(everything(), n_distinct))
+```
+
+## Exploratory Data Analysis
+
+```{r}
+# Head and tail of the cleaned data
+head(penguins_clean)
+tail(penguins_clean)
+
+# Summary of the cleaned data
+summary(penguins_clean)
+```
+
+### Histograms
+
+```{r}
+# Histograms for the bill_depth_mm, bill_length_mm, body_mass_g, and flipper_length_mm variables
+penguins_clean %>% 
+  select(
+    bill_depth_mm,
+    bill_length_mm,
+    body_mass_g,
+    flipper_length_mm
+  ) %>%
+  gather(key = "variable", value = "value") %>%
+  ggplot(aes(x = value)) +
+  geom_histogram(bins = 30) +
+  facet_wrap(~variable, scales = "free")
+```
+
+A wide variety in bill dimensions, flipper length and body mass can be seen on the histograms.
+
+### Plot 1
+
+```{r}
+# Plot 1: Flipper length by species
+ggplot(penguins_clean, aes(x = species, y = bill_depth_mm, color = sex)) +
+  geom_point(position = position_jitter(width = 0.3, height = 0.1), alpha = 0.7) +
+  labs(title = "Bill Depth by Species", 
+       y = "Bill Depth (mm)", 
+       x = "Species")
+```
+
+On Plot 1, we can see that the species of the penguins have some relationship with the bill depth. The Gentoo species tend to have smaller bill depths.
+
+### Plot 2
+
+```{r}
+# Plot 2: Flipper length by body mass
+ggplot(penguins_clean, aes(x = body_mass_g, y = bill_depth_mm, color = sex)) +
+  geom_point(position = position_jitter(width = 0.3, height = 0.1), alpha = 0.7) +
+  labs(title = "Bill Depth by Body Mass", 
+       y = "Bill Depth (mm)", 
+       x = "Body Mass (g)")
+```
+
+On Plot 2, we can see two clusters of observations. This could suggest a more complex relationship between the two variables.
+
+## Hypotheses
+
+**H1:** There is a significant relationship between bill depth (bill_depth_mm) and the predictors species (species) and body mass (body_mass_g) in penguins.
+
+**H2:** Adding sex as an additional predictor improves the model in explaining bill depth (bill_depth_mm), making the model more accurate than the simpler one with species and body mass alone.
+
+## Creating the Models
+
+### Model 1
+
+The first model's dependent variable is the bill depth and the predictors are species and body mass.
+
+```{r}
+# Model 1: Bill depth as a function of species and body mass
+model_1 <- lm(bill_depth_mm ~ species + body_mass_g, data = penguins_clean)
+summary(model_1)
+
+plot(model_1$residuals ~ model_1$fitted.values, main="Residuals vs Fitted Values", xlab="Fitted Values", ylab="Residuals")
+```
+
+The results show that body mass has a significant positive effect on bill depth, with a coefficient of b = 0.002 (p < .001). The species variable indicates that Gentoo penguins have a significantly smaller bill depth than Adelie penguins (b = -5.466, p < .001), while Chinstrap penguins do not show a significant difference (b = 0.03, p = 0.803). The model explains 80.3% of the variability in bill depth (R² = 0.803), with a residual standard error of 0.878, and is highly significant (F(3,329) = 447.1, p < .001).
+
+**Regression Equation:** Bill Depth = 12.693 + 0.032 × (Chinstrap) - 5.466 × (Gentoo) + 0.002 × (Body Mass)
+
+### Assumption Checks for Model 1
+
+```{r}
+# Check for normality assumption
+shapiro.test(model_1$residuals)
+hist(model_1$residuals, probability = TRUE, main = "Histogram of model_1 Residuals")
+qqnorm(model_1$residuals, main = "Q-Q Plot of model_1 Residuals")
+
+# Check for linearity assumption
+resettest(model_1, power = 2:3)
+
+# Check for homoscedasticity assumption
+bptest(model_1)
+
+# Check for multicollinearity
+vif(model_1)
+```
+
+According to the Shapiro-Wilk test, the normality assumption is not violated (p = 0.122). The RESET test shows that the linearity assumption is not violated (p = 0.384). The Breusch-Pagan test shows that the homoscedasticity assumption is violated (p < .001). The Variance Inflation Factor values show that there is no significant multicollinearity in the model (all VIFs < 10).
+
+### Model 2
+
+In Model 2, the predictors remain the same as in Model 1, but since in Model 1 the homoscedasticity assumption is violated, the dependent variable (bill depth) is log-transformed to account for this.
+
+```{r}
+# Model 2: Log-transformed bill depth as a function of species and body mass
+model_2 <- lm(log(bill_depth_mm) ~ species + body_mass_g, data = penguins_clean)
+summary(model_2)
+
+plot(model_2$residuals ~ model_1$fitted.values, main="Residuals vs Fitted Values", xlab="Fitted Values", ylab="Residuals")
+```
+
+The results show that body mass has a significant positive effect on log-transformed bill depth, with a coefficient of b = 0.00009 (p < .001). The species variable indicates that Gentoo penguins have a significantly smaller log-transformed bill depth than Adelie penguins (b = -0.327, p < .001), while Chinstrap penguins do not show a significant difference (b = 0.002, p = 0.801). The model explains 81.93% of the variability in log-transformed bill depth (R² = 0.819), with a residual standard error of 0.050, and is highly significant (F(3, 329) = 497.3, p < .001).
+
+**Regression Equation:** Log(Bill Depth) = 2.572 + 0.002 × (Chinstrap) - 0.327 × (Gentoo) + 0.00009 × (Body Mass)
+
+### Assumption Checks for Model 2
+
+```{r}
+# Check for normality assumption
+shapiro.test(model_2$residuals)
+hist(model_2$residuals, probability = TRUE, main = "Histogram of model_2 Residuals")
+qqnorm(model_2$residuals, main = "Q-Q Plot of model_2 Residuals")
+
+# Check for linearity assumption
+resettest(model_2, power = 2:3)
+
+# Check for homoscedasticity assumption
+bptest(model_2)
+
+# Check for multicollinearity
+vif(model_2)
+```
+
+According to the Shapiro-Wilk test, the normality assumption is not violated (p = 0.658). The RESET test shows that the linearity assumption is not violated (p = 0.269). The Breusch-Pagan test indicates that the homoscedasticity assumption is not violated (p = 0.072). The Variance Inflation Factor values show that there is no significant multicollinearity in the model (all VIFs < 10).
+
+### Model 3
+
+Model 3 is a hierarchically more complex model than Model 2, with the variable sex as a new predictor.
+
+```{r}
+# Model 3: Logarithmically transformed bill depth as a function of species, body mass, and sex
+model_3 <- lm(log(bill_depth_mm) ~ species + body_mass_g + sex, data = penguins_clean)
+summary(model_3)
+```
+
+The results show that body mass has a significant positive effect on log-transformed bill depth, with a coefficient of 4.32 × 10⁻⁵  (p < .001). The species variable indicates that Gentoo penguins have a significantly smaller log-transformed bill depth than Adelie penguins (coefficient = -0.2622, p < .001), while Chinstrap penguins do not show a significant difference (coefficient = 0.003, p = 0.641). The sex variable indicates that male penguins have a significantly larger log-transformed bill depth than females (coefficient = 0.060, p < .001). The model explains 84.99% of the variability in log-transformed bill depth (R² = 0.85), with a residual standard error of 0.046, and is highly significant (F(4, 328) = 464.4, p < .001).
+
+**Regression Equation:** Log(Bill Depth) = 2.717 + 0.0031 × (Chinstrap) - 0.2622 × (Gentoo) + 0.00004319 × (Body Mass) + 0.0596 × (Sex[Male])
+
+### Assumption Checks for Model 3
+
+```{r}
+# Check for normality assumption
+shapiro.test(model_3$residuals)
+hist(model_3$residuals, probability = TRUE, main = "Histogram of model_3 Residuals")
+qqnorm(model_3$residuals, main = "Q-Q Plot of model_3 Residuals")
+
+# Check for linearity assumption
+resettest(model_3, power = 2:3)
+
+# Check for homoscedasticity assumption
+bptest(model_3)
+
+# Check for multicollinearity
+vif(model_3)
+```
+
+According to the Shapiro-Wilk normality test, the normality assumption is not violated (p = 0.521). The RESET test shows that the linearity assumption is not violated (p = 0.447). The Breusch-Pagan test indicates that the homoscedasticity assumption is violated (p = 0.007). The Variance Inflation Factor values show that there is no significant multicollinearity in the model.
+
+### Heteroscedasticity-Consistent Covariance Matrix Estimation for Model 3
+
+Even though in Model 3 I used the log-transformed dependent variable for bill depth, the homoscedasticity assumption is still violated, therefore we need a Heteroscedasticity-Consistent Covariance Matrix Estimation for interpreting the results.
+
+```{r}
+# Heteroscedasticity-Consistent Covariance Matrix Estimation
+coeftest(model_3, vcov = vcovHC(model_3, type = "HC3"))
+```
+
+The results show that body mass has a significant positive effect on log-transformed bill depth (b = 0.00004, p < .001), and male penguins have a significantly larger log-transformed bill depth than females (b = 0.060, p < .001). Gentoo penguins have a significantly smaller log-transformed bill depth than Adelie penguins (b = -0.262, p < .001), while Chinstrap penguins do not show a significant difference (b = 0.003, p = 0.631)
+
+## Model Comparison
+
+```{r}
+# Comparing model_2 and model_3
+anova(model_2, model_3)
+
+AIC(model_2)
+AIC(model_3)
+```
+
+The comparison between Model 2 and Model 3 shows that adding the sex variable significantly improves the model. The analysis of variance (ANOVA) indicates that the addition of sex explains a significant portion of the variability in log-transformed bill depth (F(328, 1) = 66.836, p < .001).
+
+Additionally, the Akaike Information Criterion (AIC) supports the improved fit of Model 3, with a lower AIC value of -1104.46 compared to -1044.7 for Model 2. A lower AIC suggests that Model 3 is a better model, as it balances goodness of fit with model complexity.
+
+## Discussion
+
+In this analysis, I tested two hypotheses: (H1) that species and body mass influence bill depth, and (H2) that adding sex as a predictor would improve the model. Model 1 confirmed the first hypothesis (H1), showing significant effects of body mass and species on bill depth. In Model 2, which log-transformed the dependent variable, I found similar results with a slightly better fit. Model 3, which included sex as an additional predictor, supported the second hypothesis (H2), revealing that male penguins have larger bill depths than females. The addition of sex improved the model's explanatory power, as evidenced by a lower AIC and higher R-squared. These findings highlight the important role of species, body mass, and sex in explaining penguin bill depth, a trait that plays a key role in feeding and survival.
